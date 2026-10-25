@@ -15,7 +15,6 @@ export const mappingSchema = z.object({
   link: z.string().optional(),
   abandonedAt: z.string().optional(),
   orderId: z.string().optional(),
-  consent: z.string().optional(),
 });
 export type Mapping = z.infer<typeof mappingSchema>;
 export async function parseFile(buffer: Buffer, name: string) {
@@ -125,7 +124,6 @@ export async function importRows(
     valid: 0,
     invalid: 0,
     duplicates: 0,
-    withoutConsent: 0,
     updated: 0,
     imported: 0,
     errors: [] as { linha: number; erro: string }[],
@@ -147,13 +145,6 @@ export async function importRows(
           name && name.length <= 200,
           "Nome obrigatório, até 200 caracteres.",
         );
-        const consent = mapping.consent
-          ? String(row[mapping.consent]).trim().toLowerCase()
-          : "";
-        const granted = ["sim", "true", "1", "yes", "autorizado"].includes(
-          consent,
-        );
-        if (!granted) result.withoutConsent++;
         const link = mapping.link ? row[mapping.link] || "" : "";
         if (link)
           assert(
@@ -186,35 +177,9 @@ export async function importRows(
                 "UPDATE contacts SET funnel_status=$1,updated_at=now() WHERE id=$2",
                 [funnel, existing.id],
               );
-            if (
-              mapping.consent &&
-              [
-                "sim",
-                "true",
-                "1",
-                "yes",
-                "autorizado",
-                "não",
-                "nao",
-                "false",
-                "0",
-                "no",
-                "revogado",
-              ].includes(consent)
-            )
-              await tx.query(
-                "INSERT INTO contact_consents(id,user_id,contact_id,granted,source) VALUES($1,$2,$3,$4,$5)",
-                [
-                  randomUUID(),
-                  userId,
-                  existing.id,
-                  granted,
-                  `Atualização por importação ${importId}, linha ${i + 2}, coluna ${mapping.consent}: ${consent}`,
-                ],
-              );
             result.updated++;
             reason =
-              "Telefone existente: status e consentimento explícito atualizados; demais dados preservados.";
+              "Telefone existente: status do funil atualizado; demais dados e exclusões preservados.";
           } else
             reason =
               "Telefone repetido na mesma planilha; primeira ocorrência preservada.";
@@ -232,16 +197,6 @@ export async function importRows(
               link,
               date || null,
               mapping.orderId ? row[mapping.orderId] || "" : "",
-            ],
-          );
-          await tx.query(
-            "INSERT INTO contact_consents(id,user_id,contact_id,granted,source) VALUES($1,$2,$3,$4,$5)",
-            [
-              randomUUID(),
-              userId,
-              contactId,
-              granted,
-              `Importação ${importId}, linha ${i + 2}, coluna ${mapping.consent || "ausente"}: ${consent || "não informado"}`,
             ],
           );
           result.imported++;

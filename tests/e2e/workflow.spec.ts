@@ -39,18 +39,17 @@ test("login, importação Maria, mensagens, campanha simulada, histórico e mobi
   const nav = (label: string) =>
     page.locator("nav").getByRole("button", { name: label, exact: true });
   await nav("Importar Planilha").click();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "maria-e2e.csv",
-      mimeType: "text/csv",
-      buffer: Buffer.from(
-        "Nome;Telefone;Produto;Link;Consentimento\nTeste Ana;11999991234;TV;https://loja.test/a;sim\nTeste Bia;21988881234;Monitor;https://loja.test/b;sim\nSem Permissao;31977771234;TV;https://loja.test/c;nao\nDuplicado;11999991234;TV;https://loja.test/a;sim\nInvalido;123;TV;https://loja.test/a;sim",
-      ),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "maria-e2e.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "Nome;Telefone;Produto;Link\nTeste Ana;11999991234;TV;https://loja.test/a\nTeste Bia;21988881234;Monitor;https://loja.test/b\nFora da campanha;31977771234;TV;https://loja.test/c\nDuplicado;11999991234;TV;https://loja.test/a\nInvalido;123;TV;https://loja.test/a",
+    ),
+  });
   await expect(
     page.getByRole("heading", { name: "Mapear colunas" }),
   ).toBeVisible();
+  await expect(page.getByLabel("Consentimento comercial")).toHaveCount(0);
   await page.getByRole("button", { name: "Confirmar importação" }).click();
   await expect(
     page.getByRole("heading", { name: "Resultado da importação" }),
@@ -74,6 +73,14 @@ test("login, importação Maria, mensagens, campanha simulada, histórico e mobi
     .fill("Teste E2E — apenas simulação");
   await page.getByLabel("Intervalo mínimo (s)", { exact: true }).fill("1");
   await page.getByLabel("Intervalo máximo (s)", { exact: true }).fill("1");
+  await expect(
+    page.getByRole("button", { name: "Criar campanha" }),
+  ).toBeDisabled();
+  await page.getByLabel(/Teste Ana ·/).check();
+  await page.getByLabel(/Teste Bia ·/).check();
+  await expect(
+    page.getByText("Selecionar contatos da campanha · 2 selecionados"),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Criar campanha" }).click();
   await expect(page.locator("tbody")).toContainText("Teste E2E");
   await page.getByTitle("Iniciar campanha", { exact: true }).click();
@@ -91,6 +98,7 @@ test("login, importação Maria, mensagens, campanha simulada, histórico e mobi
   expect(d.counts.sent).toBe(0);
   expect(d.counts.simulated).toBe(2);
   expect(d.jobs.filter((j: any) => j.state === "simulated")).toHaveLength(2);
+  expect(d.jobs.some((j: any) => j.name === "Fora da campanha")).toBe(false);
   await nav("Histórico").click();
   await page.getByLabel("Filtrar status").selectOption("simulated");
   await expect(page.locator("tbody tr")).toHaveCount(2);

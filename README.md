@@ -7,7 +7,7 @@ Painel de recuperação de carrinhos por WhatsApp. Next.js App Router, React, Ty
 - Dashboard, campanhas, contatos, importação, quatro mensagens, histórico, relatórios e configurações responsivas.
 - Autenticação Supabase com validação de usuário no servidor; cookie HttpOnly e SameSite Strict. Nenhuma chave administrativa no cliente. As contas são isoladas por `user_id` e cada conta possui uma instância WhatsApp própria.
 - Importação CSV/XLSX de até 5 MB e 10.000 linhas: prévia, mapeamento, validação de datas ISO, normalização brasileira, deduplicação, relatório de erros e modelo CSV. Fórmulas XLSX e arquivos compactados acima dos limites são rejeitados.
-- Consentimento com fonte e histórico; exclusões permanentes; opt-out por resposta; exclusão de compras e contatos bloqueados; limites horários, diários e por contato.
+- Importação de clientes que já entraram em contato, sem campo obrigatório de consentimento; exclusões permanentes; opt-out por resposta; exclusão de compras e contatos bloqueados; limites horários, diários e por contato.
 - Quatro modelos independentes com variáveis validadas, escolha aleatória criptográfica sem distribuição fixa e conteúdo registrado na fila antes do envio.
 - Campanhas em rascunho, iniciar, pausar, continuar e cancelar; prévia na página de histórico e progresso atualizado a cada cinco segundos.
 - Fila PostgreSQL com locks, intervalo por instância, backoff para rejeições 429, recuperação após reinício e bloqueio de resultados desconhecidos. Um envio já aceito pelo provedor pode terminar após uma pausa ou cancelamento.
@@ -60,6 +60,18 @@ type .data\local-access.txt
 
 O modo local gera suas próprias credenciais. O ZIP não inclui senhas, `.env.local`, bancos ou dependências da máquina cloud. A execução no Windows depende da instalação local e não foi validada neste ambiente Linux.
 
+### Atualizar esta versão no Windows sem perder contatos
+
+Esta atualização muda apenas código, testes e documentação; não exige migration nem reinstalação das dependências.
+
+1. Encerre o servidor com **Ctrl+C**.
+2. Baixe novamente o ZIP atualizado do GitHub e extraia em uma pasta separada.
+3. Copie a pasta **`src`** do ZIP atualizado para dentro da sua pasta de instalação existente, substituindo os arquivos de código.
+4. Preserve **`.data`** e **`.env.local`** na instalação existente: contêm o banco local e seu acesso. Não substitua a instalação inteira por uma pasta vazia.
+5. Na pasta de instalação existente, execute `npm run dev -- --port 3000` e atualize o navegador com **Ctrl+F5**.
+
+Os contatos anteriormente marcados como sem autorização passam a ficar disponíveis para seleção, sem precisar importar novamente. Contatos descadastrados, bloqueados ou com compra registrada continuam excluídos. Selecione os destinatários da campanha explicitamente; não há seleção automática de toda a base.
+
 ## 2. Supabase e autenticação em produção
 
 1. Crie um projeto Supabase dedicado a este sistema, com PostgreSQL 15 ou superior.
@@ -96,29 +108,29 @@ Endpoints usados: `/instance/create`, `/instance/connect/:instance`, `/instance/
 
 A integração foi testada com servidor HTTP controlado, não com uma instância externa real neste ambiente. O pareamento, payloads específicos da sua versão, entrega real e disponibilidade dos webhooks precisam de validação com sua instalação. A recepção identifica conversas pessoais com JID `@s.whatsapp.net`; instalações que usam apenas LID precisam fornecer o mapeamento para telefone antes da operação real. Grupos e mídia não são processados como opt-out textual.
 
-A conexão Baileys não é uma integração oficial da Meta. Pode sofrer desconexões, incompatibilidades e bloqueios de conta. Não há mecanismo de evasão de limites ou bloqueios. Avalie a API oficial para produção e respeite as políticas do WhatsApp e a LGPD. Intervalos aleatórios não garantem proteção contra bloqueios nem substituem consentimento.
+A conexão Baileys não é uma integração oficial da Meta. Pode sofrer desconexões, incompatibilidades e bloqueios de conta. Não há mecanismo de evasão de limites ou bloqueios. Avalie a API oficial para produção e respeite as políticas do WhatsApp e a LGPD. Intervalos aleatórios não garantem proteção contra bloqueios e precisam respeitar as regras da plataforma.
 
 ## 4. Importar da Maria
 
 1. Em **Importar Planilha**, baixe o modelo ou envie um CSV/XLSX.
-2. Confira a prévia e mapeie Nome e Telefone. Mapeie também status, produto, carrinho, data do abandono, pedido e consentimento quando existirem.
+2. Confira a prévia e mapeie Nome e Telefone. Mapeie também status, produto, carrinho, data do abandono, pedido quando existirem.
 3. Datas devem estar em ISO, como `2026-10-25`; datas ambíguas são rejeitadas. Números nacionais de 10/11 dígitos recebem somente DDI 55; não se inventa o nono dígito ou DDD.
 4. Confirme e confira totais, duplicados e erros. Baixe o relatório para corrigir a origem.
 
-`sim`, `true`, `1`, `yes` e `autorizado` representam consentimento comercial explícito na coluna escolhida. A origem e o valor informado são registrados para auditoria. Coluna ausente ou vazia não concede consentimento. O operador deve assegurar que a autorização tenha base e evidência válidas; um arquivo importado não cria autorização por si só.
+O fluxo é voltado aos clientes que já procuraram a empresa. Não há coluna, indicador ou bloqueio obrigatório de consentimento na importação ou no envio. Contatos válidos já importados também ficam disponíveis, sem reimportação. Registros históricos em `contact_consents` são preservados para não apagar dados existentes, mas não são criados pela nova importação nem usados como condição para entrar na fila.
 
-O primeiro registro de cada telefone prevalece dentro do mesmo arquivo. Em uma nova importação, telefones existentes atualizam o status do funil e o consentimento **explicitamente informado**; nome, produto e demais dados são preservados. Valores negativos explícitos revogam autorização. Exclusões permanentes nunca são removidas pela importação.
+O primeiro registro de cada telefone prevalece dentro do mesmo arquivo. Em uma nova importação, telefones existentes atualizam o status do funil; nome, produto e demais dados são preservados. Exclusões permanentes nunca são removidas pela importação.
 
 Status `comprou`, `pago`, `purchased`, `paid`, `concluído` e `concluido` impedem entrada e processamento na fila. Para outros status da Maria, confirme a compra no painel ou adapte o mapeamento de origem com requisitos reais do sistema. O formato/API de pedidos da Maria não foi fornecido: não existe sincronização automática externa de pedidos.
 
-A lista de contatos mostra até 1.000 registros, ordenados pelos mais recentes. A campanha sem seleção manual considera todos os elegíveis do banco, incluindo os fora dessa página. Importe dados reais somente após definir retenção e acesso adequados à sua operação.
+A lista de contatos mostra até 1.000 registros, ordenados pelos mais recentes. A campanha exige seleção explícita de destinatários; uma seleção vazia não inclui toda a base. Apenas os contatos escolhidos e ainda elegíveis entram na fila. Importe dados reais somente após definir retenção e acesso adequados à sua operação.
 
 ## 5. Mensagens, simulação e campanhas
 
 1. Salve até quatro mensagens habilitadas. Variáveis permitidas: `{{nome}}`, `{{produto}}`, `{{link}}`. Uma variável sem valor em qualquer contato selecionado bloqueia a criação; revise antes de iniciar.
 2. Inclua orientação de descadastro, por exemplo **Responda SAIR para parar**. As respostas SAIR, PARAR, PARE, STOP, CANCELAR, REMOVER, DESCADASTRAR e NÃO QUERO são reconhecidas no começo do texto.
 3. Configure intervalos de 1 a 3.600 segundos, horários de São Paulo e limites. Padrões: 15–50 segundos, 08h–20h, 30/hora, 100/24h e sete dias entre contatos. Limites são janelas móveis, compartilhados por conta, inclusive entre campanhas.
-4. Crie campanha em modo **Simulação**. Ela nasce como rascunho. Use o ícone de prévia para revisar o conteúdo registrado no histórico e depois clique Iniciar.
+4. Crie campanha em modo **Simulação** e selecione explicitamente os destinatários. Para testar com 30, marque somente esses 30 e confira o contador antes de criar. Ela nasce como rascunho. Use o ícone de prévia para revisar o conteúdo registrado no histórico e depois clique Iniciar.
 5. A simulação respeita elegibilidade, fila e intervalos, sem chamadas ao provedor; ignora janelas e limites de envio real para poder testar a qualquer hora. Resultados aparecem como Simulado, separados das métricas reais.
 6. Para envio real, o administrador precisa configurar **ambas** `SIMULATION_MODE=false` e `REAL_SEND_ENABLED=true`, conectar WhatsApp e criar uma campanha explicitamente em modo real. Alterar flags não transforma campanhas simuladas em reais. Este desenvolvimento não realizou envios reais.
 
@@ -165,7 +177,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-Os testes usam PostgreSQL embarcado real (PGlite), sem credenciais externas e sem disparos. Cobrem CSV/XLSX, mapeamento, telefones, duplicados, consentimento/revogação, templates, intervalos, pausa/retomada/cancelamento, fila persistente em disco, concorrência, timeout, retry, desconexão, eventos, isolamento por conta e RLS. O adaptador Evolution é testado contra um servidor HTTP local controlado.
+Os testes usam PostgreSQL embarcado real (PGlite), sem credenciais externas e sem disparos. Cobrem CSV/XLSX, mapeamento, telefones, duplicados, importação sem campo de consentimento, contatos existentes com metadados históricos, seleção explícita de destinatários, templates, intervalos, pausa/retomada/cancelamento, fila persistente em disco, concorrência, timeout, retry, desconexão, eventos, isolamento por conta e RLS. O adaptador Evolution é testado contra um servidor HTTP local controlado.
 
 O teste Playwright percorre o painel em desktop/mobile, autenticação, proteção de rotas/Origin/webhook, importação, mensagens, campanha simulada e exportação. Use **banco de testes vazio e isolado**, pois cria contatos explicitamente fictícios de teste:
 

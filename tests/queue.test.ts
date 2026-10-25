@@ -21,6 +21,16 @@ before(async () => {
   db = await createLocal();
   await migrate(db);
 });
+async function campaignForContacts(
+  database: DB,
+  userId: string,
+  input: Record<string, unknown>,
+) {
+  const contactIds = (
+    await database.query("SELECT id FROM contacts WHERE user_id=$1", [userId])
+  ).rows.map((c) => c.id);
+  return createCampaign(database, userId, { ...input, contactIds });
+}
 async function setup(simulation = true) {
   const user = { id: randomUUID(), email: "test@example.test" };
   await ensureUser(db, user);
@@ -40,7 +50,6 @@ async function setup(simulation = true) {
     {
       name: "Nome",
       phone: "Tel",
-      consent: "Consent",
       product: "Produto",
       link: "Link",
     },
@@ -50,7 +59,7 @@ async function setup(simulation = true) {
     "UPDATE message_templates SET content='Oi {{nome}}, {{produto}}: {{link}}. Responda SAIR para parar.' WHERE user_id=$1 AND slot=1",
     [user.id],
   );
-  const { id } = await createCampaign(db, user.id, {
+  const { id } = await campaignForContacts(db, user.id, {
     name: "Campanha teste",
     minInterval: 1,
     maxInterval: 1,
@@ -63,7 +72,7 @@ async function jobs(id: string) {
     await db.query("SELECT * FROM message_jobs WHERE campaign_id=$1", [id])
   ).rows;
 }
-test("mapeamento, deduplicação e exclusão de contatos sem consentimento", async () => {
+test("mapeamento e deduplicação permitem contatos sem campo de consentimento", async () => {
   const user = { id: randomUUID(), email: "import@test.test" };
   await ensureUser(db, user);
   const result = await importRows(
@@ -76,23 +85,31 @@ test("mapeamento, deduplicação e exclusão de contatos sem consentimento", asy
       { Cliente: "Bia", Tel: "21988881234", Perm: "" },
       { Cliente: "Erro", Tel: "123", Perm: "sim" },
     ],
-    { name: "Cliente", phone: "Tel", consent: "Perm" },
+    { name: "Cliente", phone: "Tel" },
   );
   assert.equal(result.imported, 2);
   assert.equal(result.duplicates, 1);
   assert.equal(result.invalid, 1);
-  assert.equal(result.withoutConsent, 1);
+  assert.equal("withoutConsent" in result, false);
+  assert.equal(
+    (
+      await db.query("SELECT * FROM contact_consents WHERE user_id=$1", [
+        user.id,
+      ])
+    ).rows.length,
+    0,
+  );
   await db.query(
     "UPDATE message_templates SET content='Olá {{nome}}' WHERE user_id=$1 AND slot=1",
     [user.id],
   );
-  const c = await createCampaign(db, user.id, {
-    name: "Consentimento",
+  const c = await campaignForContacts(db, user.id, {
+    name: "Clientes que entraram em contato",
     minInterval: 1,
     maxInterval: 1,
     simulation: true,
   });
-  assert.equal(c.total, 1);
+  assert.equal(c.total, 2);
   const other = (
     await db.query("SELECT * FROM contacts WHERE user_id=$1", [user.id])
   ).rows;
@@ -215,13 +232,13 @@ test("fila persiste em banco em disco após reabertura", async () => {
     user.id,
     "persist.csv",
     [{ Nome: "Ana", Tel: "11999991234", Consent: "sim" }],
-    { name: "Nome", phone: "Tel", consent: "Consent" },
+    { name: "Nome", phone: "Tel" },
   );
   await durable.query(
     "UPDATE message_templates SET content='Oi {{nome}}' WHERE user_id=$1 AND slot=1",
     [user.id],
   );
-  const c = await createCampaign(durable, user.id, {
+  const c = await campaignForContacts(durable, user.id, {
     name: "Persistência real",
     minInterval: 1,
     maxInterval: 1,
@@ -413,7 +430,7 @@ test("RLS permite apenas leitura própria e bloqueia escritas diretas", async ()
     /row-level security/,
   );
 });
-test("nova exportação Maria atualiza compra no funil e revoga consentimento sem remover exclusão", async () => {
+test("nova exportação Maria atualiza compra no funil sem remover exclusão", async () => {
   const { user, id } = await setup();
   await campaignAction(db, user.id, id, "cancel");
   const update = await importRows(
@@ -421,13 +438,13 @@ test("nova exportação Maria atualiza compra no funil e revoga consentimento se
     user.id,
     "maria-atualizada.csv",
     [{ Nome: "Ana", Tel: "11999991234", Status: "pago", Consent: "nao" }],
-    { name: "Nome", phone: "Tel", status: "Status", consent: "Consent" },
+    { name: "Nome", phone: "Tel", status: "Status" },
   );
   assert.equal(update.updated, 1);
   assert.equal(update.imported, 0);
   await assert.rejects(
     () =>
-      createCampaign(db, user.id, {
+      campaignForContacts(db, user.id, {
         name: "Não enviar",
         minInterval: 1,
         maxInterval: 1,
@@ -441,12 +458,114 @@ test("nova exportação Maria atualiza compra no funil e revoga consentimento se
     user.id,
     "maria-nova.csv",
     [{ Nome: "Ana", Tel: "11999991234", Status: "abandonado", Consent: "sim" }],
-    { name: "Nome", phone: "Tel", status: "Status", consent: "Consent" },
+    { name: "Nome", phone: "Tel", status: "Status" },
   );
   await assert.rejects(
     () =>
-      createCampaign(db, user.id, {
+      campaignForContacts(db, user.id, {
         name: "Exclusão prevalece",
+        minInterval: 1,
+        maxInterval: 1,
+        simulation: true,
+      }),
+    /Nenhum contato elegível/,
+  );
+});
+test("contatos existentes com registro antigo negativo deixam de ser bloqueados por esse campo", async () => {
+  const { user, id } = await setup();
+  await campaignAction(db, user.id, id, "cancel");
+  const contact = (
+    await db.query("SELECT id FROM contacts WHERE user_id=$1", [user.id])
+  ).rows[0];
+  await db.query(
+    "INSERT INTO contact_consents(id,user_id,contact_id,granted,source) VALUES($1,$2,$3,false,$4)",
+    [
+      randomUUID(),
+      user.id,
+      contact.id,
+      "Registro histórico de importação sem campo",
+    ],
+  );
+  const c = await createCampaign(db, user.id, {
+    name: "Contatos existentes",
+    minInterval: 1,
+    maxInterval: 1,
+    simulation: true,
+    contactIds: [contact.id],
+  });
+  assert.equal(c.total, 1);
+  await campaignAction(db, user.id, c.id, "start");
+  await tick(db, () => {
+    throw Error("Simulação não chama provedor");
+  });
+  assert.equal((await jobs(c.id))[0].state, "simulated");
+  assert.equal(
+    (
+      await db.query(
+        "SELECT granted FROM contact_consents WHERE contact_id=$1",
+        [contact.id],
+      )
+    ).rows[0].granted,
+    false,
+  );
+});
+test("campanha exige seleção explícita e não inclui contatos fora da seleção", async () => {
+  const { user, id } = await setup();
+  await campaignAction(db, user.id, id, "cancel");
+  const first = (
+    await db.query("SELECT id FROM contacts WHERE user_id=$1", [user.id])
+  ).rows[0].id;
+  await importRows(
+    db,
+    user.id,
+    "outros.csv",
+    [{ Nome: "Outro contato", Tel: "21999991234" }],
+    { name: "Nome", phone: "Tel" },
+  );
+  const input = {
+    name: "Somente escolhidos",
+    minInterval: 1,
+    maxInterval: 1,
+    simulation: true,
+  };
+  await assert.rejects(() => createCampaign(db, user.id, input));
+  await assert.rejects(() =>
+    createCampaign(db, user.id, { ...input, contactIds: [] }),
+  );
+  const c = await createCampaign(db, user.id, {
+    ...input,
+    contactIds: [first],
+  });
+  assert.equal(c.total, 1);
+  assert.deepEqual(
+    (await jobs(c.id)).map((j) => j.contact_id),
+    [first],
+  );
+});
+test("contatos bloqueados e com compra confirmada continuam fora da fila", async () => {
+  const { user, id } = await setup();
+  await campaignAction(db, user.id, id, "cancel");
+  await db.query("UPDATE contacts SET blocked=true WHERE user_id=$1", [
+    user.id,
+  ]);
+  await assert.rejects(
+    () =>
+      campaignForContacts(db, user.id, {
+        name: "Bloqueado",
+        minInterval: 1,
+        maxInterval: 1,
+        simulation: true,
+      }),
+    /Nenhum contato elegível/,
+  );
+  await db.query(
+    "UPDATE contacts SET blocked=false,purchased_at=now(),purchase_source='Pedido confirmado' WHERE user_id=$1",
+    [user.id],
+  );
+  await assert.rejects(
+    () =>
+      campaignForContacts(db, user.id, {
+        name: "Comprou",
         minInterval: 1,
         maxInterval: 1,
         simulation: true,

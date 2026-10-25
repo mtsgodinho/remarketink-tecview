@@ -211,7 +211,6 @@ async function handler(
             Link: "",
             DataAbandono: "",
             Pedido: "",
-            Consentimento: "",
           },
         ]),
         "modelo-maria.csv",

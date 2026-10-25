@@ -31,7 +31,8 @@ export default function Login() {
             oportunidade de recuperação.
           </p>
           <div className="story-badge">
-            <ShieldCheck size={18} /> Consentimento, controle e rastreabilidade.
+            <ShieldCheck size={18} /> Relacionamento, controle e
+            rastreabilidade.
           </div>
         </div>
         <small>TECHVIEW · Plataforma de relacionamento</small>

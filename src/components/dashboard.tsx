@@ -52,6 +52,10 @@ const tabs = [
   ["Configurações", Settings],
 ] as const;
 const labels: Record<string, string> = {
+  available: "Disponível",
+  suppressed: "Descadastrado",
+  blocked: "Bloqueado",
+  purchased: "Compra registrada",
   draft: "Rascunho",
   running: "Em andamento",
   paused: "Pausada",
@@ -240,7 +244,6 @@ export default function Dashboard() {
         link: ["link", "link do carrinho"],
         abandonedAt: ["dataabandono", "data do abandono"],
         orderId: ["pedido", "identificador do pedido"],
-        consent: ["consentimento", "autorização", "autorizacao"],
       };
       const m: Record<string, string> = {};
       for (const [k, values] of Object.entries(aliases)) {
@@ -269,10 +272,9 @@ export default function Dashboard() {
           }).format(new Date(j.processed_at || j.created_at)) === filters.date),
     ) || [];
   const historyQuery = new URLSearchParams({ ...filters, search }).toString();
-  const eligible =
+  const eligible: Row[] =
     d?.contacts.filter(
       (c: Row) =>
-        c.consent &&
         !c.suppressed &&
         !c.blocked &&
         !c.purchased_at &&
@@ -438,7 +440,7 @@ export default function Dashboard() {
     ) : (
       <Empty
         title="Sua próxima campanha começa aqui"
-        text="Importe contatos com consentimento e personalize suas mensagens para criar uma campanha."
+        text="Importe seus contatos e personalize suas mensagens para criar uma campanha."
         action={
           <button
             className="button secondary"
@@ -883,7 +885,7 @@ export default function Dashboard() {
                             <th>Contato</th>
                             <th>Telefone</th>
                             <th>Produto / funil</th>
-                            <th>Permissão</th>
+                            <th>Situação</th>
                             <th>Ações</th>
                           </tr>
                         </thead>
@@ -902,23 +904,27 @@ export default function Dashboard() {
                               <td>
                                 <Badge
                                   state={
-                                    c.suppressed || c.blocked
-                                      ? "skipped"
-                                      : c.purchased_at
-                                        ? "completed"
-                                        : c.consent
-                                          ? "open"
-                                          : "disconnected"
+                                    c.suppressed
+                                      ? "suppressed"
+                                      : c.blocked
+                                        ? "blocked"
+                                        : eligible.some(
+                                              (item) => item.id === c.id,
+                                            )
+                                          ? "available"
+                                          : "purchased"
                                   }
                                 />
                                 <small>
                                   {c.suppressed
                                     ? "Exclusão permanente"
-                                    : c.purchased_at
-                                      ? "Compra confirmada"
-                                      : c.consent
-                                        ? "Consentimento registrado"
-                                        : "Sem consentimento"}
+                                    : c.blocked
+                                      ? "Número bloqueado"
+                                      : eligible.some(
+                                            (item) => item.id === c.id,
+                                          )
+                                        ? "Disponível para seleção em campanhas"
+                                        : "Compra confirmada ou registrada no funil"}
                                 </small>
                               </td>
                               <td>
@@ -963,14 +969,14 @@ export default function Dashboard() {
                       {!d.contacts.length && (
                         <Empty
                           title="Sua base ainda está vazia"
-                          text="Importe a planilha da Maria para começar. Consentimento é obrigatório para envios."
+                          text="Importe a planilha da Maria para começar e selecione os destinatários ao criar uma campanha."
                         />
                       )}
                     </div>
                   </section>
                   <p className="footnote">
-                    Exibindo até 1.000 contatos. Importar não autoriza disparos.
-                    Números sem consentimento permanecem fora da fila.
+                    Exibindo até 1.000 contatos. Selecione os destinatários ao
+                    criar a campanha; importar não inicia envios.
                   </p>
                 </>
               )}
@@ -1053,10 +1059,11 @@ export default function Dashboard() {
                       <div>
                         <span>03</span>
                         <p>
-                          <strong>Verifique o consentimento</strong>
+                          <strong>Confira os destinatários</strong>
                           <small>
-                            Apenas uma autorização explícita habilita mensagens
-                            comerciais.
+                            Escolha os contatos do teste na campanha.
+                            Descadastros, bloqueios e compras continuam
+                            excluídos.
                           </small>
                         </p>
                       </div>
@@ -1084,7 +1091,6 @@ export default function Dashboard() {
                           link: "Link do carrinho",
                           abandonedAt: "Data do abandono",
                           orderId: "Identificador do pedido",
-                          consent: "Consentimento comercial",
                         }).map(([k, label]) => (
                           <label key={k}>
                             {label}
@@ -1103,11 +1109,10 @@ export default function Dashboard() {
                         ))}
                       </div>
                       <div className="notice info">
-                        Consentimento aceito: sim, true, 1, yes ou autorizado.
-                        Ausência ou qualquer outro valor mantém o contato sem
-                        autorização. Duplicados atualizam o status do funil e o
-                        consentimento explicitamente informado. Demais dados e
-                        exclusões permanentes são preservados.
+                        Contatos válidos ficam disponíveis para seleção em
+                        campanhas. Duplicados atualizam o status do funil;
+                        exclusões permanentes são preservadas. A importação não
+                        inicia envios.
                       </div>
                       <h3>Prévia das primeiras {preview.rows.length} linhas</h3>
                       <div className="table-wrap">
@@ -1168,7 +1173,6 @@ export default function Dashboard() {
                           valid: "Válidos",
                           invalid: "Inválidos",
                           duplicates: "Duplicados",
-                          withoutConsent: "Sem autorização",
                           imported: "Importados",
                           updated: "Atualizados",
                         }).map(([k, v]) => (
@@ -1779,7 +1783,7 @@ export default function Dashboard() {
                       </button>
                       <p className="footnote">
                         Intervalos aleatórios não evitam bloqueios e não
-                        substituem consentimento.
+                        substituem as regras da plataforma.
                       </p>
                     </section>
                   </div>
@@ -1900,7 +1904,7 @@ export default function Dashboard() {
               void perform(async () => {
                 await api("campaigns", "POST", {
                   ...campaign,
-                  ...(selected.length ? { contactIds: selected } : {}),
+                  contactIds: selected,
                 });
                 setModal(false);
                 setSelected([]);
@@ -1989,11 +1993,13 @@ export default function Dashboard() {
                 </option>
               </select>
             </label>
-            <details className="contact-select">
-              <summary>Selecionar contatos específicos (opcional)</summary>
+            <details className="contact-select" open>
+              <summary>
+                Selecionar contatos da campanha · {selected.length} selecionados
+              </summary>
               <p>
-                Sem seleção: todos os elegíveis do banco. A lista abaixo mostra
-                até 1.000 contatos.
+                Marque apenas os destinatários desta campanha. Sem seleção,
+                nenhuma campanha será criada. A lista mostra até 1.000 contatos.
               </p>
               {eligible.map((c: Row) => (
                 <label key={c.id}>
@@ -2013,10 +2019,13 @@ export default function Dashboard() {
               ))}
             </details>
             <div className="notice info">
-              Criar não inicia envios. Contatos sem consentimento, com compra ou
-              exclusão são removidos automaticamente da seleção.
+              Criar não inicia envios. Contatos bloqueados, descadastrados ou
+              com compra registrada são excluídos da seleção.
             </div>
-            <button className="button primary" disabled={busy}>
+            <button
+              className="button primary"
+              disabled={busy || !selected.length}
+            >
               <Plus size={17} /> Criar campanha
             </button>
           </form>

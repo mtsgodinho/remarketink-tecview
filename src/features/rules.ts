@@ -32,7 +32,10 @@ export const campaignSchema = z
     minInterval: z.number().int().min(1).max(3600),
     maxInterval: z.number().int().min(1).max(3600),
     simulation: z.boolean(),
-    contactIds: z.array(z.uuid()).max(10000).optional(),
+    contactIds: z
+      .array(z.uuid())
+      .min(1, "Selecione pelo menos um contato para a campanha.")
+      .max(10000),
   })
   .refine((v) => v.maxInterval >= v.minInterval, "Intervalo inválido.");
 const DDD = new Set(

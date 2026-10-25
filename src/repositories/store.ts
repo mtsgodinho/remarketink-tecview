@@ -42,8 +42,7 @@ export async function ensureUser(db: DB, user: User) {
 }
 export const eligibleSQL = `SELECT ct.* FROM contacts ct WHERE ct.user_id=$1 AND NOT ct.blocked AND ct.purchased_at IS NULL
  AND lower(ct.funnel_status) NOT IN ('comprou','pago','purchased','paid','concluído','concluido')
- AND NOT EXISTS(SELECT 1 FROM contact_suppressions s WHERE s.user_id=ct.user_id AND s.phone=ct.phone)
- AND (SELECT cc.granted AND (cc.expires_at IS NULL OR cc.expires_at>now()) FROM contact_consents cc WHERE cc.contact_id=ct.id ORDER BY cc.recorded_at DESC,cc.id DESC LIMIT 1)=true`;
+ AND NOT EXISTS(SELECT 1 FROM contact_suppressions s WHERE s.user_id=ct.user_id AND s.phone=ct.phone)`;
 export async function createCampaign(db: DB, user: string, input: unknown) {
   const data = campaignSchema.parse(input);
   return db.transaction(async (tx) => {
@@ -66,12 +65,12 @@ export async function createCampaign(db: DB, user: string, input: unknown) {
         [user],
       )
     ).rows;
-    const eligible = (await tx.query(eligibleSQL, [user])).rows.filter(
-      (c) => !data.contactIds || data.contactIds.includes(c.id),
+    const eligible = (await tx.query(eligibleSQL, [user])).rows.filter((c) =>
+      data.contactIds.includes(c.id),
     );
     assert(
       eligible.length,
-      "Nenhum contato elegível com consentimento válido.",
+      "Nenhum contato elegível na seleção. Confira exclusões, bloqueios e compras.",
     );
     const id = randomUUID();
     await tx.query(
@@ -201,7 +200,7 @@ export async function overview(db: DB, user: string) {
     suppressions,
   ] = await Promise.all([
     db.query(
-      `SELECT ct.*,(SELECT granted AND (expires_at IS NULL OR expires_at>now()) FROM contact_consents WHERE contact_id=ct.id ORDER BY recorded_at DESC,id DESC LIMIT 1) AS consent,
+      `SELECT ct.*,
  EXISTS(SELECT 1 FROM contact_suppressions s WHERE s.user_id=ct.user_id AND s.phone=ct.phone) AS suppressed FROM contacts ct WHERE ct.user_id=$1 ORDER BY ct.created_at DESC LIMIT 1000`,
       [user],
     ),

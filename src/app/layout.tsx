@@ -3,7 +3,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "TechView Remarketing",
   description:
-    "Gestão de recuperação de carrinhos com consentimento e rastreabilidade.",
+    "Gestão de recuperação de carrinhos com controle e rastreabilidade.",
 };
 export default function RootLayout({
   children,
