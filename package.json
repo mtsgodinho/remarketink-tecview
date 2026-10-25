@@ -1,0 +1,53 @@
+{
+  "name": "techview-remarketing",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "worker": "tsx --env-file-if-exists=.env.local src/workers/run.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "local:setup": "tsx scripts/local-setup.ts",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src scripts tests *.ts *.json *.mjs *.md"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@supabase/supabase-js": "^2.80.0",
+    "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^1.61.0",
+    "next": "^16.0.0",
+    "papaparse": "^5.5.3",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/postcss": "^4.1.17",
+    "@types/node": "^24.10.0",
+    "@types/papaparse": "^5.3.16",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3"
+  },
+  "type": "module",
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  },
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11 <12"
+  }
+}
